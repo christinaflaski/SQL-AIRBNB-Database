@@ -1,0 +1,395 @@
+QUERY 1)
+
+EXPLAIN ANALYZE SELECT "Host".id, COUNT(*) FROM "Listing", "Host" WHERE
+"Host".id="Listing".host_id GROUP BY "Host".id;
+
+------BEFORE
+"HashAggregate  (cost=3273.70..3337.33 rows=6363 width=12) (actual time=18.024..19.027 rows=6363 loops=1)"
+"  Group Key: ""Host"".id"
+"  ->  Hash Join  (cost=255.26..3215.99 rows=11541 width=4) (actual time=2.173..15.006 rows=11541 loops=1)"
+"        Hash Cond: (""Listing"".host_id = ""Host"".id)"
+"        ->  Seq Scan on ""Listing""  (cost=0.00..2930.41 rows=11541 width=4) (actual time=0.012..9.692 rows=11541 loops=1)"
+"        ->  Hash  (cost=175.73..175.73 rows=6363 width=4) (actual time=2.144..2.144 rows=6363 loops=1)"
+"              Buckets: 8192  Batches: 1  Memory Usage: 288kB"
+"              ->  Index Only Scan using ""Host_pkey"" on ""Host""  (cost=0.28..175.73 rows=6363 width=4) (actual time=0.009..0.995 rows=6363 loops=1)"
+"                    Heap Fetches: 0"
+"Planning Time: 0.183 ms"
+"Execution Time: 19.642 ms"
+
+------AFTER
+
+"HashAggregate  (cost=652.69..716.32 rows=6363 width=12) (actual time=9.910..10.850 rows=6363 loops=1)"
+"  Group Key: ""Host"".id"
+"  ->  Hash Join  (cost=255.55..594.98 rows=11541 width=4) (actual time=3.089..6.974 rows=11541 loops=1)"
+"        Hash Cond: (""Listing"".host_id = ""Host"".id)"
+"        ->  Index Only Scan using index2 on ""Listing""  (cost=0.29..309.40 rows=11541 width=4) (actual time=0.013..1.422 rows=11541 loops=1)"
+"              Heap Fetches: 0"
+"        ->  Hash  (cost=175.73..175.73 rows=6363 width=4) (actual time=3.000..3.001 rows=6363 loops=1)"
+"              Buckets: 8192  Batches: 1  Memory Usage: 288kB"
+"              ->  Index Only Scan using ""Host_pkey"" on ""Host""  (cost=0.28..175.73 rows=6363 width=4) (actual time=0.039..1.210 rows=6363 loops=1)"
+"                    Heap Fetches: 0"
+"Planning Time: 0.376 ms"
+"Execution Time: 11.527 ms"
+
+
+/* Query 1: w/out index: 19.642 ms, w/ index: 11.527 ms 
+We choose the Listing host_id for the index because the id in the Host table is a primary key*/
+
+-------------------------------------------------------------------------------------3
+
+QUERY 2)
+
+EXPLAIN ANALYZE SELECT id, price FROM "Listing", "Price" WHERE guests_included > 5
+AND price > 40;
+
+-----BEFORE
+
+"Nested Loop  (cost=0.29..19386.97 rows=1500330 width=8) (actual time=0.081..292.419 rows=2469774 loops=1)"
+"  ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..309.40 rows=11541 width=4) (actual time=0.030..1.571 rows=11541 loops=1)"
+"        Heap Fetches: 0"
+"  ->  Materialize  (cost=0.00..323.76 rows=130 width=4) (actual time=0.000..0.008 rows=214 loops=11541)"
+"        ->  Seq Scan on ""Price""  (cost=0.00..323.12 rows=130 width=4) (actual time=0.022..2.140 rows=214 loops=1)"
+"              Filter: ((guests_included > 5) AND (price > '40'::numeric))"
+"              Rows Removed by Filter: 11327"
+"Planning Time: 0.218 ms"
+"Execution Time: 346.140 ms"
+
+-----AFTER
+
+"Nested Loop  (cost=0.43..19073.95 rows=1500330 width=8) (actual time=0.103..258.331 rows=2469774 loops=1)"
+"  ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..309.40 rows=11541 width=4) (actual time=0.077..1.556 rows=11541 loops=1)"
+"        Heap Fetches: 0"
+"  ->  Materialize  (cost=0.14..10.75 rows=130 width=4) (actual time=0.000..0.007 rows=214 loops=11541)"
+"        ->  Index Only Scan using index_price on ""Price""  (cost=0.14..10.10 rows=130 width=4) (actual time=0.019..0.074 rows=214 loops=1)"
+"              Heap Fetches: 0"
+"Planning Time: 0.408 ms"
+"Execution Time: 306.326 ms"
+
+
+/* Query 2: w/out index: 346.140 ms, w/ index: 306.326 ms 
+It's faster with the index because we find immediately thru the indexes the listings with guests included >5 and with price more than 40*/
+
+-------------------------------------------------------------------------------------
+
+QUERY 3)
+
+EXPLAIN ANALYZE SELECT count("Room".listing_id) AS NUMBER_OF_ROOMS,"Location".neighbourhood,"Price".price,"Room".accommodates
+FROM "Room"
+JOIN "Listing" ON "Listing".id = "Room".listing_id
+JOIN "Price" ON "Price".listing_id = "Listing".id
+JOIN "Location" ON "Location".listing_id="Listing".id
+GROUP BY "Location".neighbourhood,"Room".accommodates,"Price".price
+HAVING "Room".accommodates>8 AND "Price".price<=100
+ORDER BY "Price".price;
+
+------BEFORE
+
+"GroupAggregate  (cost=2871.23..2878.07 rows=304 width=25) (actual time=14.410..14.483 rows=114 loops=1)"
+"  Group Key: ""Price"".price, ""Location"".neighbourhood, ""Room"".accommodates"
+"  ->  Sort  (cost=2871.23..2871.99 rows=304 width=21) (actual time=14.402..14.410 rows=139 loops=1)"
+"        Sort Key: ""Price"".price, ""Location"".neighbourhood, ""Room"".accommodates"
+"        Sort Method: quicksort  Memory: 35kB"
+"        ->  Nested Loop  (cost=2364.91..2858.69 rows=304 width=21) (actual time=9.974..14.138 rows=139 loops=1)"
+"              Join Filter: (""Room"".listing_id = ""Listing"".id)"
+"              ->  Hash Join  (cost=2364.62..2759.35 rows=304 width=29) (actual time=9.946..13.590 rows=139 loops=1)"
+"                    Hash Cond: (""Location"".listing_id = ""Room"".listing_id)"
+"                    ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=13) (actual time=0.028..1.449 rows=11541 loops=1)"
+"                    ->  Hash  (cost=2360.82..2360.82 rows=304 width=16) (actual time=9.881..9.881 rows=139 loops=1)"
+"                          Buckets: 1024  Batches: 1  Memory Usage: 16kB"
+"                          ->  Hash Join  (cost=2039.53..2360.82 rows=304 width=16) (actual time=4.428..9.800 rows=139 loops=1)"
+"                                Hash Cond: (""Price"".listing_id = ""Room"".listing_id)"
+"                                ->  Seq Scan on ""Price""  (cost=0.00..294.26 rows=10295 width=8) (actual time=0.012..3.957 rows=10292 loops=1)"
+"                                      Filter: (price <= '100'::numeric)"
+"                                      Rows Removed by Filter: 1249"
+"                                ->  Hash  (cost=2035.26..2035.26 rows=341 width=8) (actual time=4.380..4.381 rows=341 loops=1)"
+"                                      Buckets: 1024  Batches: 1  Memory Usage: 22kB"
+"                                      ->  Seq Scan on ""Room""  (cost=0.00..2035.26 rows=341 width=8) (actual time=0.345..4.271 rows=341 loops=1)"
+"                                            Filter: (accommodates > 8)"
+"                                            Rows Removed by Filter: 11200"
+"              ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..0.31 rows=1 width=4) (actual time=0.003..0.003 rows=1 loops=139)"
+"                    Index Cond: (id = ""Location"".listing_id)"
+"                    Heap Fetches: 0"
+"Planning Time: 1.235 ms"
+"Execution Time: 14.600 ms"
+
+------AFTER
+"GroupAggregate  (cost=849.23..856.07 rows=304 width=25) (actual time=8.253..8.290 rows=114 loops=1)"
+"  Group Key: ""Price"".price, ""Location"".neighbourhood, ""Room"".accommodates"
+"  ->  Sort  (cost=849.23..849.99 rows=304 width=21) (actual time=8.247..8.251 rows=139 loops=1)"
+"        Sort Key: ""Price"".price, ""Location"".neighbourhood, ""Room"".accommodates"
+"        Sort Method: quicksort  Memory: 35kB"
+"        ->  Nested Loop  (cost=342.91..836.69 rows=304 width=21) (actual time=5.452..8.112 rows=139 loops=1)"
+"              Join Filter: (""Room"".listing_id = ""Listing"".id)"
+"              ->  Hash Join  (cost=342.62..737.35 rows=304 width=29) (actual time=5.430..7.815 rows=139 loops=1)"
+"                    Hash Cond: (""Location"".listing_id = ""Room"".listing_id)"
+"                    ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=13) (actual time=0.034..0.907 rows=11541 loops=1)"
+"                    ->  Hash  (cost=338.82..338.82 rows=304 width=16) (actual time=5.360..5.361 rows=139 loops=1)"
+"                          Buckets: 1024  Batches: 1  Memory Usage: 16kB"
+"                          ->  Hash Join  (cost=17.53..338.82 rows=304 width=16) (actual time=0.223..5.307 rows=139 loops=1)"
+"                                Hash Cond: (""Price"".listing_id = ""Room"".listing_id)"
+"                                ->  Seq Scan on ""Price""  (cost=0.00..294.26 rows=10295 width=8) (actual time=0.014..3.680 rows=10292 loops=1)"
+"                                      Filter: (price <= '100'::numeric)"
+"                                      Rows Removed by Filter: 1249"
+"                                ->  Hash  (cost=13.26..13.26 rows=341 width=8) (actual time=0.179..0.179 rows=341 loops=1)"
+"                                      Buckets: 1024  Batches: 1  Memory Usage: 22kB"
+"                                      ->  Index Only Scan using index_room on ""Room""  (cost=0.15..13.26 rows=341 width=8) (actual time=0.024..0.095 rows=341 loops=1)"
+"                                            Heap Fetches: 0"
+"              ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..0.31 rows=1 width=4) (actual time=0.002..0.002 rows=1 loops=139)"
+"                    Index Cond: (id = ""Location"".listing_id)"
+"                    Heap Fetches: 0"
+"Planning Time: 1.735 ms"
+"Execution Time: 8.407 ms"
+/* Query 3: w/out index: 14.600 ms, w/ index: 8.407 ms
+It's faster with the index because we find immediately thru the indexes the rooms with more than 8 accommodates and less than 100$*/
+
+-------------------------------------------------------------------------------------
+
+QUERY 4)
+
+EXPLAIN ANALYZE SELECT "Host".id,"Host".url,"Host".name, ROUND(Avg("Price".price)) AS average_price, COUNT("Listing".id) AS NUMBER_OF_ROOMS
+FROM "Listing"
+JOIN "Host" ON "Host".id = "Listing".host_id
+JOIN "Price" ON "Price".listing_id= "Listing".id
+GROUP BY "Host".id,"Host".url, "Host".name
+ORDER BY NUMBER_OF_ROOMS DESC;
+
+-------BEFORE
+
+"Sort  (cost=4602.87..4618.78 rows=6363 width=95) (actual time=34.848..35.037 rows=6363 loops=1)"
+"  Sort Key: (count(""Listing"".id)) DESC"
+"  Sort Method: quicksort  Memory: 1087kB"
+"  ->  HashAggregate  (cost=4105.43..4200.88 rows=6363 width=95) (actual time=28.859..33.072 rows=6363 loops=1)"
+"        Group Key: ""Host"".id"
+"        ->  Hash Join  (cost=3692.84..4018.87 rows=11541 width=63) (actual time=16.114..23.727 rows=11541 loops=1)"
+"              Hash Cond: (""Listing"".host_id = ""Host"".id)"
+"              ->  Hash Join  (cost=3074.67..3370.39 rows=11541 width=12) (actual time=10.957..15.755 rows=11541 loops=1)"
+"                    Hash Cond: (""Price"".listing_id = ""Listing"".id)"
+"                    ->  Seq Scan on ""Price""  (cost=0.00..265.41 rows=11541 width=8) (actual time=0.031..0.887 rows=11541 loops=1)"
+"                    ->  Hash  (cost=2930.41..2930.41 rows=11541 width=8) (actual time=10.813..10.814 rows=11541 loops=1)"
+"                          Buckets: 16384  Batches: 1  Memory Usage: 579kB"
+"                          ->  Seq Scan on ""Listing""  (cost=0.00..2930.41 rows=11541 width=8) (actual time=0.012..9.324 rows=11541 loops=1)"
+"              ->  Hash  (cost=538.63..538.63 rows=6363 width=55) (actual time=5.074..5.074 rows=6363 loops=1)"
+"                    Buckets: 8192  Batches: 1  Memory Usage: 614kB"
+"                    ->  Seq Scan on ""Host""  (cost=0.00..538.63 rows=6363 width=55) (actual time=0.022..2.607 rows=6363 loops=1)"
+"Planning Time: 0.666 ms"
+"Execution Time: 36.357 ms"
+
+----AFTER 
+
+"Sort  (cost=4602.87..4618.78 rows=6363 width=95) (actual time=36.251..36.486 rows=6363 loops=1)"
+"  Sort Key: (count(""Listing"".id)) DESC"
+"  Sort Method: quicksort  Memory: 1087kB"
+"  ->  HashAggregate  (cost=4105.43..4200.88 rows=6363 width=95) (actual time=30.023..34.346 rows=6363 loops=1)"
+"        Group Key: ""Host"".id"
+"        ->  Hash Join  (cost=3692.84..4018.87 rows=11541 width=63) (actual time=15.860..24.395 rows=11541 loops=1)"
+"              Hash Cond: (""Listing"".host_id = ""Host"".id)"
+"              ->  Hash Join  (cost=3074.67..3370.39 rows=11541 width=12) (actual time=11.722..16.949 rows=11541 loops=1)"
+"                    Hash Cond: (""Price"".listing_id = ""Listing"".id)"
+"                    ->  Seq Scan on ""Price""  (cost=0.00..265.41 rows=11541 width=8) (actual time=0.013..0.993 rows=11541 loops=1)"
+"                    ->  Hash  (cost=2930.41..2930.41 rows=11541 width=8) (actual time=11.634..11.634 rows=11541 loops=1)"
+"                          Buckets: 16384  Batches: 1  Memory Usage: 579kB"
+"                          ->  Seq Scan on ""Listing""  (cost=0.00..2930.41 rows=11541 width=8) (actual time=0.007..10.042 rows=11541 loops=1)"
+"              ->  Hash  (cost=538.63..538.63 rows=6363 width=55) (actual time=4.074..4.074 rows=6363 loops=1)"
+"                    Buckets: 8192  Batches: 1  Memory Usage: 614kB"
+"                    ->  Seq Scan on ""Host""  (cost=0.00..538.63 rows=6363 width=55) (actual time=0.022..2.255 rows=6363 loops=1)"
+"Planning Time: 0.661 ms"
+"Execution Time: 37.905 ms"
+
+/* Query 4: w/out index: 36.357 ms, w/ index: 37.905 ms 
+It's better not to use index in this query since the id in the Host table and the id the Listing table are primary keys*/
+
+-------------------------------------------------------------------------------------
+
+QUERY 5)
+
+EXPLAIN ANALYZE SELECT "Neighbourhood".neighbourhood,"Geolocation2".geometry_coordinates_0_0_90_0,COUNT("Listing".id) AS NUMBER_OF_APARTMENTS
+FROM "Neighbourhood"
+LEFT OUTER JOIN "Geolocation2" ON "Geolocation2".properties_neighbourhood="Neighbourhood".neighbourhood
+JOIN "Location" ON "Neighbourhood".neighbourhood= "Location".neighbourhood_cleansed
+JOIN "Listing" ON "Listing".id= "Location".listing_id
+WHERE "Listing".property_type='Apartment' 
+GROUP BY "Geolocation2".properties_neighbourhood,"Neighbourhood".neighbourhood,"Geolocation2".geometry_coordinates_0_0_90_0
+ORDER BY "Geolocation2".geometry_coordinates_0_0_90_0 ASC;
+
+-----BEFORE
+
+"Sort  (cost=3839.87..3844.93 rows=2025 width=59) (actual time=31.112..31.115 rows=45 loops=1)"
+"  Sort Key: ""Geolocation2"".geometry_coordinates_0_0_90_0"
+"  Sort Method: quicksort  Memory: 30kB"
+"  ->  HashAggregate  (cost=3708.41..3728.66 rows=2025 width=59) (actual time=31.063..31.081 rows=45 loops=1)"
+"        Group Key: ""Geolocation2"".geometry_coordinates_0_0_90_0, ""Geolocation2"".properties_neighbourhood, ""Neighbourhood"".neighbourhood"
+"        ->  Hash Join  (cost=3094.30..3609.30 rows=9911 width=55) (actual time=16.685..26.459 rows=9911 loops=1)"
+"              Hash Cond: ((""Location"".neighbourhood_cleansed)::text = (""Neighbourhood"".neighbourhood)::text)"
+"              ->  Hash Join  (cost=3083.15..3461.87 rows=9911 width=33) (actual time=16.524..22.502 rows=9911 loops=1)"
+"                    Hash Cond: (""Location"".listing_id = ""Listing"".id)"
+"                    ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=33) (actual time=0.007..1.170 rows=11541 loops=1)"
+"                    ->  Hash  (cost=2959.26..2959.26 rows=9911 width=4) (actual time=16.430..16.430 rows=9911 loops=1)"
+"                          Buckets: 16384  Batches: 1  Memory Usage: 477kB"
+"                          ->  Seq Scan on ""Listing""  (cost=0.00..2959.26 rows=9911 width=4) (actual time=0.011..14.913 rows=9911 loops=1)"
+"                                Filter: ((property_type)::text = 'Apartment'::text)"
+"                                Rows Removed by Filter: 1630"
+"              ->  Hash  (cost=10.59..10.59 rows=45 width=51) (actual time=0.154..0.154 rows=45 loops=1)"
+"                    Buckets: 1024  Batches: 1  Memory Usage: 12kB"
+"                    ->  Hash Right Join  (cost=2.01..10.59 rows=45 width=51) (actual time=0.055..0.135 rows=45 loops=1)"
+"                          Hash Cond: ((""Geolocation2"".properties_neighbourhood)::text = (""Neighbourhood"".neighbourhood)::text)"
+"                          ->  Seq Scan on ""Geolocation2""  (cost=0.00..8.45 rows=45 width=30) (actual time=0.007..0.020 rows=45 loops=1)"
+"                          ->  Hash  (cost=1.45..1.45 rows=45 width=21) (actual time=0.040..0.040 rows=45 loops=1)"
+"                                Buckets: 1024  Batches: 1  Memory Usage: 11kB"
+"                                ->  Seq Scan on ""Neighbourhood""  (cost=0.00..1.45 rows=45 width=21) (actual time=0.019..0.027 rows=45 loops=1)"
+"Planning Time: 0.961 ms"
+"Execution Time: 31.530 ms"
+
+-----AFTER 
+
+"Sort  (cost=3839.87..3844.93 rows=2025 width=59) (actual time=26.150..26.151 rows=45 loops=1)"
+"  Sort Key: ""Geolocation2"".geometry_coordinates_0_0_90_0"
+"  Sort Method: quicksort  Memory: 30kB"
+"  ->  HashAggregate  (cost=3708.41..3728.66 rows=2025 width=59) (actual time=26.101..26.121 rows=45 loops=1)"
+"        Group Key: ""Geolocation2"".geometry_coordinates_0_0_90_0, ""Geolocation2"".properties_neighbourhood, ""Neighbourhood"".neighbourhood"
+"        ->  Hash Join  (cost=3094.30..3609.30 rows=9911 width=55) (actual time=15.507..22.638 rows=9911 loops=1)"
+"              Hash Cond: ((""Location"".neighbourhood_cleansed)::text = (""Neighbourhood"".neighbourhood)::text)"
+"              ->  Hash Join  (cost=3083.15..3461.87 rows=9911 width=33) (actual time=15.391..19.682 rows=9911 loops=1)"
+"                    Hash Cond: (""Location"".listing_id = ""Listing"".id)"
+"                    ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=33) (actual time=0.006..0.886 rows=11541 loops=1)"
+"                    ->  Hash  (cost=2959.26..2959.26 rows=9911 width=4) (actual time=15.316..15.316 rows=9911 loops=1)"
+"                          Buckets: 16384  Batches: 1  Memory Usage: 477kB"
+"                          ->  Seq Scan on ""Listing""  (cost=0.00..2959.26 rows=9911 width=4) (actual time=0.010..14.013 rows=9911 loops=1)"
+"                                Filter: ((property_type)::text = 'Apartment'::text)"
+"                                Rows Removed by Filter: 1630"
+"              ->  Hash  (cost=10.59..10.59 rows=45 width=51) (actual time=0.109..0.109 rows=45 loops=1)"
+"                    Buckets: 1024  Batches: 1  Memory Usage: 12kB"
+"                    ->  Hash Right Join  (cost=2.01..10.59 rows=45 width=51) (actual time=0.042..0.098 rows=45 loops=1)"
+"                          Hash Cond: ((""Geolocation2"".properties_neighbourhood)::text = (""Neighbourhood"".neighbourhood)::text)"
+"                          ->  Seq Scan on ""Geolocation2""  (cost=0.00..8.45 rows=45 width=30) (actual time=0.005..0.013 rows=45 loops=1)"
+"                          ->  Hash  (cost=1.45..1.45 rows=45 width=21) (actual time=0.032..0.032 rows=45 loops=1)"
+"                                Buckets: 1024  Batches: 1  Memory Usage: 11kB"
+"                                ->  Seq Scan on ""Neighbourhood""  (cost=0.00..1.45 rows=45 width=21) (actual time=0.017..0.025 rows=45 loops=1)"
+"Planning Time: 0.867 ms"
+"Execution Time: 26.517 ms"
+/* Query 5: w/out index: 31.530 ms , w/ index: 26.517 ms 
+It's faster with the index because we dont have to check all the table to find the listings with property type as apartment */
+
+-------------------------------------------------------------------------------------
+
+QUERY 6)
+
+EXPLAIN ANALYZE SELECT "Location".neighbourhood_cleansed AS neighbourhood ,MAX("Price".price) AS maximum_price
+FROM "Location"
+JOIN "Listing" ON "Location".listing_id="Listing".id
+JOIN "Price" ON "Price".listing_id = "Listing".id
+GROUP BY "Location".neighbourhood_cleansed 
+HAVING MAX( "Price".price) <100;
+
+------BEFORE
+
+"HashAggregate  (cost=1487.30..1487.86 rows=15 width=61) (actual time=20.914..20.920 rows=7 loops=1)"
+"  Group Key: ""Location"".neighbourhood_cleansed"
+"  Filter: (max(""Price"".price) < '100'::numeric)"
+"  Rows Removed by Filter: 38"
+"  ->  Hash Join  (cost=863.34..1400.74 rows=11541 width=33) (actual time=9.772..17.668 rows=11541 loops=1)"
+"        Hash Cond: (""Location"".listing_id = ""Price"".listing_id)"
+"        ->  Hash Join  (cost=453.66..832.38 rows=11541 width=37) (actual time=5.965..10.634 rows=11541 loops=1)"
+"              Hash Cond: (""Location"".listing_id = ""Listing"".id)"
+"              ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=33) (actual time=0.014..0.964 rows=11541 loops=1)"
+"              ->  Hash  (cost=309.40..309.40 rows=11541 width=4) (actual time=5.847..5.847 rows=11541 loops=1)"
+"                    Buckets: 16384  Batches: 1  Memory Usage: 534kB"
+"                    ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..309.40 rows=11541 width=4) (actual time=0.020..4.091 rows=11541 loops=1)"
+"                          Heap Fetches: 0"
+"        ->  Hash  (cost=265.41..265.41 rows=11541 width=8) (actual time=3.777..3.777 rows=11541 loops=1)"
+"              Buckets: 16384  Batches: 1  Memory Usage: 624kB"
+"              ->  Seq Scan on ""Price""  (cost=0.00..265.41 rows=11541 width=8) (actual time=0.022..1.835 rows=11541 loops=1)"
+"Planning Time: 0.518 ms"
+"Execution Time: 21.306 ms"
+
+----- AFTER 
+
+"HashAggregate  (cost=1487.30..1487.86 rows=15 width=61) (actual time=17.015..17.021 rows=7 loops=1)"
+"  Group Key: ""Location"".neighbourhood_cleansed"
+"  Filter: (max(""Price"".price) < '100'::numeric)"
+"  Rows Removed by Filter: 38"
+"  ->  Hash Join  (cost=863.34..1400.74 rows=11541 width=33) (actual time=6.208..13.731 rows=11541 loops=1)"
+"        Hash Cond: (""Location"".listing_id = ""Price"".listing_id)"
+"        ->  Hash Join  (cost=453.66..832.38 rows=11541 width=37) (actual time=2.681..7.183 rows=11541 loops=1)"
+"              Hash Cond: (""Location"".listing_id = ""Listing"".id)"
+"              ->  Seq Scan on ""Location""  (cost=0.00..348.41 rows=11541 width=33) (actual time=0.013..0.888 rows=11541 loops=1)"
+"              ->  Hash  (cost=309.40..309.40 rows=11541 width=4) (actual time=2.587..2.588 rows=11541 loops=1)"
+"                    Buckets: 16384  Batches: 1  Memory Usage: 534kB"
+"                    ->  Index Only Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..309.40 rows=11541 width=4) (actual time=0.014..1.149 rows=11541 loops=1)"
+"                          Heap Fetches: 0"
+"        ->  Hash  (cost=265.41..265.41 rows=11541 width=8) (actual time=3.371..3.371 rows=11541 loops=1)"
+"              Buckets: 16384  Batches: 1  Memory Usage: 624kB"
+"              ->  Seq Scan on ""Price""  (cost=0.00..265.41 rows=11541 width=8) (actual time=0.028..1.613 rows=11541 loops=1)"
+"Planning Time: 0.845 ms"
+"Execution Time: 17.427 ms"
+
+/* Query 6: w/out index: 21.306 ms, w/ index: 17.427 ms */
+
+-------------------------------------------------------------------------------------
+
+QUERY 7)
+
+EXPLAIN ANALYZE SELECT COUNT("Room".listing_id) AS NUMBER_OF_ROOMS ,"Host".id,"Host".name
+FROM "Room"
+LEFT OUTER JOIN "Listing" ON "Listing".id = "Room".listing_id
+LEFT OUTER JOIN "Price" ON "Price".listing_id= "Listing".id
+LEFT OUTER JOIN "Host" ON "Host".id= "Listing".host_id
+WHERE "Price".price<100 AND "Room".bedrooms>2
+GROUP BY "Host".id
+ORDER BY NUMBER_OF_ROOMS DESC;
+
+------BEFORE
+
+"Sort  (cost=4055.67..4057.79 rows=849 width=20) (actual time=9.593..9.608 rows=390 loops=1)"
+"  Sort Key: (count(""Room"".listing_id)) DESC"
+"  Sort Method: quicksort  Memory: 55kB"
+"  ->  HashAggregate  (cost=4005.88..4014.37 rows=849 width=20) (actual time=9.320..9.475 rows=390 loops=1)"
+"        Group Key: ""Host"".id"
+"        ->  Nested Loop Left Join  (cost=2048.05..4001.63 rows=849 width=16) (actual time=3.284..9.155 rows=543 loops=1)"
+"              ->  Nested Loop  (cost=2047.77..3601.28 rows=849 width=8) (actual time=3.275..8.071 rows=543 loops=1)"
+"                    Join Filter: (""Room"".listing_id = ""Listing"".id)"
+"                    ->  Hash Join  (cost=2047.49..2368.06 rows=849 width=8) (actual time=3.253..6.226 rows=543 loops=1)"
+"                          Hash Cond: (""Price"".listing_id = ""Room"".listing_id)"
+"                          ->  Seq Scan on ""Price""  (cost=0.00..294.26 rows=10018 width=4) (actual time=0.020..2.069 rows=10018 loops=1)"
+"                                Filter: (price < '100'::numeric)"
+"                                Rows Removed by Filter: 1523"
+"                          ->  Hash  (cost=2035.26..2035.26 rows=978 width=4) (actual time=3.213..3.214 rows=978 loops=1)"
+"                                Buckets: 1024  Batches: 1  Memory Usage: 43kB"
+"                                ->  Seq Scan on ""Room""  (cost=0.00..2035.26 rows=978 width=4) (actual time=0.499..3.076 rows=978 loops=1)"
+"                                      Filter: (bedrooms > 2)"
+"                                      Rows Removed by Filter: 10563"
+"                    ->  Index Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..1.44 rows=1 width=8) (actual time=0.003..0.003 rows=1 loops=543)"
+"                          Index Cond: (id = ""Price"".listing_id)"
+"              ->  Index Scan using ""Host_pkey"" on ""Host""  (cost=0.28..0.47 rows=1 width=12) (actual time=0.002..0.002 rows=1 loops=543)"
+"                    Index Cond: (id = ""Listing"".host_id)"
+"Planning Time: 0.614 ms"
+"Execution Time: 9.699 ms"
+
+
+-----AFTER
+
+"Sort  (cost=2055.35..2057.47 rows=849 width=20) (actual time=7.557..7.569 rows=390 loops=1)"
+"  Sort Key: (count(""Room"".listing_id)) DESC"
+"  Sort Method: quicksort  Memory: 55kB"
+"  ->  HashAggregate  (cost=2005.56..2014.05 rows=849 width=20) (actual time=7.382..7.448 rows=390 loops=1)"
+"        Group Key: ""Host"".id"
+"        ->  Nested Loop Left Join  (cost=47.74..2001.31 rows=849 width=16) (actual time=0.517..7.204 rows=543 loops=1)"
+"              ->  Nested Loop  (cost=47.45..1600.96 rows=849 width=8) (actual time=0.502..5.933 rows=543 loops=1)"
+"                    Join Filter: (""Room"".listing_id = ""Listing"".id)"
+"                    ->  Hash Join  (cost=47.17..367.74 rows=849 width=8) (actual time=0.485..3.980 rows=543 loops=1)"
+"                          Hash Cond: (""Price"".listing_id = ""Room"".listing_id)"
+"                          ->  Seq Scan on ""Price""  (cost=0.00..294.26 rows=10018 width=4) (actual time=0.025..2.459 rows=10018 loops=1)"
+"                                Filter: (price < '100'::numeric)"
+"                                Rows Removed by Filter: 1523"
+"                          ->  Hash  (cost=34.95..34.95 rows=978 width=4) (actual time=0.437..0.437 rows=978 loops=1)"
+"                                Buckets: 1024  Batches: 1  Memory Usage: 43kB"
+"                                ->  Index Only Scan using index_room2 on ""Room""  (cost=0.28..34.95 rows=978 width=4) (actual time=0.023..0.220 rows=978 loops=1)"
+"                                      Heap Fetches: 0"
+"                    ->  Index Scan using ""Listings2_pkey"" on ""Listing""  (cost=0.29..1.44 rows=1 width=8) (actual time=0.003..0.003 rows=1 loops=543)"
+"                          Index Cond: (id = ""Price"".listing_id)"
+"              ->  Index Scan using ""Host_pkey"" on ""Host""  (cost=0.28..0.47 rows=1 width=12) (actual time=0.002..0.002 rows=1 loops=543)"
+"                    Index Cond: (id = ""Listing"".host_id)"
+"Planning Time: 1.243 ms"
+"Execution Time: 7.669 ms"
+
+/* Query 7: w/out index:  9.699 ms, w/ index: 7.669 ms 
+It's faster with the index because we find immediately thru the indexes the rooms that cost less than 100$ and have more than 2 bedrooms*/
